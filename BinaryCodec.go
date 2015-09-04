@@ -3,29 +3,50 @@ package rti
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
+	"fmt"
 	"log"
+	"runtime/debug"
+	"strings"
 	"sync"
 )
 
-var buffer bytes.Buffer
-
-// Create some bytes to hold the header
-var header [32]byte
-
-var mutex = &sync.Mutex{}
+var buffer bytes.Buffer   // Buffer the incoming data
+var header [32]byte       // Create some bytes to hold the header
+var mutex = &sync.Mutex{} // mutex to prevent writing to the buffer while using it
 
 // Ensemble ID
 // 16 Bytes of 0x80 or 128
 //var ensID = [...]byte{0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80}
 
-const hdlen = 32
-const idlen = 16
-const checksumSize = 4
+const hdlen = 32       // Header Length
+const idlen = 16       // ID Length
+const checksumSize = 4 // Checksum size
 
-var ensembleSize uint32
-var ensembleNum uint32
-var headerFound bool
-var headerIndex int
+const dataTypeFloat = 10 // Default value for the base data type FLOAT (ValueType)
+const dataTypeInt = 20   // Default value for the base data type INTEGER (ValueType)
+const dataTypeByte = 50  // Default value for the base data type BYTE (ValueType)
+
+const defaultImag = 0              // Default value for IMG in base data
+const defaultNameLength = 8        // Default value for the Name Length in the base data
+const numDataSetHeaderElements = 6 // This is number of elements in the header of a dataset.  Each element is a byte except the NAME.  Its size varies and is given by NameLength.
+const payloadHeaderLen = 28        // Each payload contains a header with DataType, Bins or Elements, Beams or 1, Image, ID (Name) Length and ID (name)
+
+const beamVelocityID = "E000001"       // Beam Velocity Dataset ID
+const instrumentVelocityID = "E000002" // Instrument Velocity Dataset ID
+const earthVelocityID = "E000003"      // Earth Velocity Dataset ID
+const amplitudeID = "E000004"          // Amplitude Dataset ID
+const correlationID = "E000005"        // Correlation Dataset ID
+const goodBeamID = "E000006"           // Good Beam Dataset ID
+const goodEarthID = "E000007"          // Good Earth Dataset ID
+const ensembleDataID = "E000008"       // Ensemble Dataset ID
+const ancillaryID = "E000009"          // Ancillary Dataset ID
+const bottomTrackID = "E000010"        // Bottom Track Dataset ID
+
+var ensembleSize uint32 // Current ensemble size
+var ensembleNum uint32  // Current ensemble Number
+var headerFound bool    // Flag if header is found
+var headerIndex int     // Header index
 
 // BinaryCodec decodes and passes
 // all the decoded data as ensembles.
@@ -34,15 +55,6 @@ type BinaryCodec struct {
 	Read      chan Ensemble // Read out ensembles decoded
 	IsClosing bool          // Flag to stop decoding data
 }
-
-// codec creates all the channels to decod
-// the data and pass it to all those that want
-// the decoded ensemble data.
-// var codec = binaryCodec{
-// 	write:     make(chan []byte),
-// 	read:      make(chan Ensemble),
-// 	isClosing: false,
-// }
 
 // Run will take any incoming data and decode it.
 func (codec *BinaryCodec) Run() {
@@ -87,26 +99,10 @@ func (codec *BinaryCodec) Run() {
 func decodeIncomingData() {
 	//log.Print("Add data to buffer")
 
-	// Append the data to the buffer
-	//buffer = append(buffer, data...)
-	//buffer.Add(data)
-
 	// If the header has not been found, find the header
 	if !headerFound {
-
-		// // Verify enough bytes are there to read the header
-		//if buffer.Len() >= hdlen-headerIndex {
-		// 	//temp := buffer.Bytes()
-		// 	//log.Printf("buffer not big enough for header %d %d", buffer.Len(), temp[0])
-		// 	//log.Printf("Header Index: %d", headerIndex)
-		//log.Printf("Buffer size: %d", buffer.Len())
-		//log.Printf("Header %v", header)
-		// 	return
-		// }
-
 		// Look for the beginning of and ensemble
 		findHeader()
-		//}
 	}
 
 	// If the header was not found, return
@@ -156,36 +152,187 @@ func decodeIncomingData() {
 	//log.Printf("Checksum: %d", checksum)
 	//log.Printf("Checksum: %d  calculated1 checksum %d", checksum, cal1Checksum)
 
-	// clear the header
+	// Clear the header
 	clearHeader()
 
 	//log.Printf("Ensemble number: %d  Ensemble size: %d", ensembleNum, len(ens))
 	//log.Printf("Last two bytes of ensemble: %x %x", ens[len(ens)-1], ens[len(ens)-2])
 
-	//log.Printf("Buffer Size: %d", len(buffer))
-	// Remove the ensemble from the buffer
-	//buffer = buffer[ensSize:len(buffer)]
-	//log.Printf("New Buffer size: %d", len(buffer))
-
 	if uint32(cal1Checksum) == checksum {
-		log.Printf("Ensemble number: %d  Ensemble size: %d", ensembleNum, len(ens))
+		//log.Printf("Ensemble number: %d  Ensemble size: %d", ensembleNum, len(ens))
+		// Decode the ensemble
+		ensemble := decodeEnsemble(ens)
+
+		log.Printf("Ensemble number: %d Number of Beams: %d  Number of Bins: %d", ensemble.EnsembleDataSet.EnsembleNumber, ensemble.EnsembleDataSet.NumBeams, ensemble.EnsembleDataSet.NumBins)
+
+		ensJSON, _ := json.Marshal(ensemble)
+
+		fmt.Println(string(ensJSON))
+
 	}
+
+	// Garbage collect
+	debug.FreeOSMemory()
+}
+
+func decodeEnsemble(data []byte) Ensemble {
+	// Keep track where in the packet
+	// we are currently decoding
+	var packetPointer = hdlen
+	var enstype uint32
+	var numElements uint32
+	var elementMultiplier uint32
+	var imag uint32
+	var nameLen uint32
+	var name string
+	var dataSetSize int
+	var ensemble Ensemble
+
+	for i := 0; i < MaxNumDataSets; i++ {
+		// Ensemble type
+		ptr := packetPointer + (BytesInInt32 * 0)
+		enstype = binary.LittleEndian.Uint32(data[ptr : ptr+4])
+		//log.Printf("Ensemble Type: %d", enstype)
+
+		// Number of elements
+		ptr = packetPointer + (BytesInInt32 * 1)
+		numElements = binary.LittleEndian.Uint32(data[ptr : ptr+4])
+		//log.Printf("Num Elements: %d", numElements)
+
+		// Element Mulitiplier
+		ptr = packetPointer + (BytesInInt32 * 2)
+		elementMultiplier = binary.LittleEndian.Uint32(data[ptr : ptr+4])
+		//log.Printf("Element Multiplier: %d", elementMultiplier)
+
+		// Image
+		ptr = packetPointer + (BytesInInt32 * 3)
+		imag = binary.LittleEndian.Uint32(data[ptr : ptr+4])
+		//log.Printf("Image: %d", imag)
+
+		// Name Length
+		ptr = packetPointer + (BytesInInt32 * 4)
+		nameLen = binary.LittleEndian.Uint32(data[ptr : ptr+4])
+		//log.Printf("Name Length: %d", nameLen)
+
+		// DataSet Name
+		ptr = packetPointer + (BytesInFloat * 5)
+		name = string(data[ptr : ptr+8])
+		//log.Printf("Name: %s", name)
+
+		// Data set size
+		dataSetSize = getDataSetSize(enstype, nameLen, numElements, elementMultiplier)
+
+		// Beam Velocity Dataset
+		if strings.Contains(name, beamVelocityID) {
+
+			// Move to the next dataset
+			packetPointer += dataSetSize
+		} else if strings.Contains(name, ensembleDataID) {
+			// Base
+			ensemble.EnsembleDataSet.Base.Enstype = enstype
+			ensemble.EnsembleDataSet.Base.NumElements = numElements
+			ensemble.EnsembleDataSet.Base.ElementMultiplier = elementMultiplier
+			ensemble.EnsembleDataSet.Base.Imag = imag
+			ensemble.EnsembleDataSet.Base.NameLen = nameLen
+			ensemble.EnsembleDataSet.Base.Name = name
+
+			// Ensemble Data Set
+			ensemble.EnsembleDataSet.Decode(data[packetPointer : packetPointer+dataSetSize])
+
+			// Move to the next dataset
+			packetPointer += dataSetSize
+		} else if strings.Contains(name, ancillaryID) {
+			// Base
+			ensemble.AncillaryDataSet.Base.Enstype = enstype
+			ensemble.AncillaryDataSet.Base.NumElements = numElements
+			ensemble.AncillaryDataSet.Base.ElementMultiplier = elementMultiplier
+			ensemble.AncillaryDataSet.Base.Imag = imag
+			ensemble.AncillaryDataSet.Base.NameLen = nameLen
+			ensemble.AncillaryDataSet.Base.Name = name
+
+			// Ancillary Data Set
+			ensemble.AncillaryDataSet.Decode(data[packetPointer : packetPointer+dataSetSize])
+
+			// Move to the next dataset
+			packetPointer += dataSetSize
+		} else {
+			// Move to the next dataset
+			packetPointer += dataSetSize
+		}
+
+		// Check if there is anymore data
+		if packetPointer+4 >= len(data) {
+			break
+		}
+
+	}
+
+	return ensemble
 
 }
 
+// GenerateIndex will find the location of the data within
+// the slice based off the index value given.
+func GenerateIndex(index int, nameLen uint32, ensType uint32) int {
+	datatype := BytesInFloat
+
+	switch ensType {
+	case dataTypeByte:
+		datatype = BytesInInt8
+		break
+	case dataTypeInt:
+		datatype = BytesInInt32
+		break
+	case dataTypeFloat:
+		datatype = BytesInFloat
+		break
+	default:
+		datatype = BytesInFloat
+		break
+	}
+
+	return getHeaderSize(nameLen) + (index * datatype)
+}
+
+// getDataSetSize will get the size of the dataset.  It will user the number of elements and the
+// element mulitipler to determine how many bytes are within the dataset.  It will also include the
+// header.  It will also need to know how many bytes per element.
+// Data is usually numElements x elementMultipler
+// Bin data: bins x beams
+// Other data: numElements x 1
+func getDataSetSize(ensType uint32, nameLen uint32, numElements uint32, elementMultiplier uint32) int {
+
+	datatype := BytesInFloat
+
+	switch ensType {
+	case dataTypeByte:
+		datatype = BytesInInt8
+		break
+	case dataTypeInt:
+		datatype = BytesInInt32
+		break
+	case dataTypeFloat:
+		datatype = BytesInFloat
+		break
+	default:
+		datatype = BytesInFloat
+		break
+	}
+
+	return ((int(numElements) * int(elementMultiplier)) * int(datatype)) + getHeaderSize(nameLen)
+}
+
+// getHeaderSize will get the number bytes in the header.
+func getHeaderSize(nameLen uint32) int {
+	return int(nameLen) + (BytesInInt32 * (numDataSetHeaderElements - 1))
+}
+
+// findHeader will find the header to the ensemble.
 func findHeader() {
 	//log.Printf("Search for ID %d Index: %d", buffer.Len(), headerIndex)
 
 	// Remove the first byte until it is an ID
 	for {
-		// // Verify enough bytes are there to read the header
-		// if buffer.Len() < hdlen {
-		// 	log.Printf("Buffer not big enough to find ID %d", buffer.Len())
-		// 	//log.Printf("Header Index: %d", headerIndex)
-		// 	//log.Printf("Header %v", header)
-		// 	return
-		// }
-
 		// Read the next byte in the buffer
 		id, err := buffer.ReadByte()
 
@@ -197,22 +344,12 @@ func findHeader() {
 
 		// Check if the ID is correct
 		if id != 0x80 {
-			//log.Printf("Not ID: %x", id)
-			//log.Printf("Header Index: %d", headerIndex)
-			//if headerIndex == 1 {
-			//temp := buffer.Bytes()
-			//log.Printf("%v", temp[:5])
-			//}
 			// Start over since not an ID value
 			headerIndex = 0
 		} else {
 			//log.Printf("Header Index: %d", headerIndex)
 			header[headerIndex] = id // Set the first ID
 			headerIndex++
-			//log.Printf("ID: %x", id)
-			//log.Printf("Header %v", header)
-			//log.Printf("Header Index: %d", headerIndex)
-			//log.Printf("Buffer cap: %d", buffer.Cap())
 
 			// Found a complete ID
 			if headerIndex == idlen {
@@ -220,10 +357,6 @@ func findHeader() {
 			}
 		}
 	}
-
-	//log.Print("ID found")
-
-	//log.Print("Verify the header")
 
 	var invEnsNum uint32
 	var ensNum uint32
@@ -244,10 +377,6 @@ func findHeader() {
 		// Set the values
 		header[headerIndex] = id
 	}
-
-	//log.Print("Getting Payload and Ensemble number")
-	//log.Printf("Header %v", header)
-	//log.Printf("header index: %d", headerIndex)
 
 	// Look for the ensemble number and payload size
 	// Get the ensemble number
@@ -279,10 +408,11 @@ func findHeader() {
 }
 
 // clearHeader will clear the header.
+// It will reset all the values.
 func clearHeader() {
-	for i := 0; i < 32; i++ {
-		header[i] = 0
-	}
+	// for i := 0; i < 32; i++ {
+	// 	header[i] = 0
+	// }
 	headerIndex = 0
 	headerFound = false
 
@@ -290,13 +420,9 @@ func clearHeader() {
 
 }
 
-/// <summary>
-/// Calculate the checksum for the given ensemble.
-/// This will use CRC-16 to calculate the checksum.
-/// Give all bytes in the Ensemble including the checksum.
-/// </summary>
-/// <param name="ensemble">Byte array of the data.</param>
-/// <returns>Checksum value for the given byte[].</returns>
+// calculateEnsembleChecksum will calculate the checksum for
+// the given ensemble. This will use CRC-16 to calculate the checksum.
+// Give all bytes in the Ensemble including the checksum.
 func calculateEnsembleChecksum(ensemble []byte) uint16 {
 	var crc uint16
 

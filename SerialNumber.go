@@ -4,10 +4,11 @@ package rti
 // It includes the hardware type, Subsystem Configurations
 // Spare and the serial number.
 type SerialNumber struct {
-	Hardware   AdcpBaseHardware // Hardware type
-	Spare      string           // Spare String
-	SerialNum  int              // Serial Number
-	Subsystems []Subsystem      // Subystems
+	SerialNumber string           // String representation of the serial number
+	Hardware     AdcpBaseHardware // Hardware type
+	Spare        string           // Spare String
+	SerialNum    int              // Serial Number
+	Subsystems   []Subsystem      // Subystems
 }
 
 // AdcpBaseHardware is the ADCP Base Hardware Enum Type
