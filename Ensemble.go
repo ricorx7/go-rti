@@ -29,7 +29,9 @@ type BaseDataSet struct {
 type Ensemble struct {
 	binaryData []byte // Binary Data
 
-	EnsembleDataSet  EnsembleDataSet  // Ensemble Data Set
-	AncillaryDataSet AncillaryDataSet // Ancillary Data Set
-
+	EnsembleData           EnsembleDataSet           // Ensemble Data Set
+	AncillaryData          AncillaryDataSet          // Ancillary Data Set
+	BeamVelocityData       BeamVelocityDataSet       // Beam Velocity Data Set
+	InstrumentVelocityData InstrumentVelocityDataSet // Instrument Velocity Data Set
+	EarthVelocityData      EarthVelocityDataSet      // Earth Velocity Data Set
 }

@@ -3,13 +3,21 @@ package rti
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
-	"fmt"
 	"log"
 	"runtime/debug"
 	"strings"
 	"sync"
 )
+
+/*
+ * HISTORY
+ * -----------------------------------------------------------------
+ * Date            Initials    Version    Comments
+ * -----------------------------------------------------------------
+ * 09/08/2015      RC          1.0        Initial coding
+ *
+ *
+ */
 
 var buffer bytes.Buffer   // Buffer the incoming data
 var header [32]byte       // Create some bytes to hold the header
@@ -88,7 +96,7 @@ func (codec *BinaryCodec) Run() {
 			//log.Printf("AddBuffer size: %d", buffer.Len())
 
 			// Decode the data
-			decodeIncomingData()
+			decodeIncomingData(codec)
 
 			mutex.Unlock()
 			//log.Print("End binarycodec run write")
@@ -96,7 +104,7 @@ func (codec *BinaryCodec) Run() {
 	}
 }
 
-func decodeIncomingData() {
+func decodeIncomingData(codec *BinaryCodec) {
 	//log.Print("Add data to buffer")
 
 	// If the header has not been found, find the header
@@ -149,7 +157,7 @@ func decodeIncomingData() {
 
 	cal1Checksum := calculateEnsembleChecksum(ens)
 
-	//log.Printf("Checksum: %d", checksum)
+	log.Printf("Checksum: %d", checksum)
 	//log.Printf("Checksum: %d  calculated1 checksum %d", checksum, cal1Checksum)
 
 	// Clear the header
@@ -163,11 +171,16 @@ func decodeIncomingData() {
 		// Decode the ensemble
 		ensemble := decodeEnsemble(ens)
 
-		log.Printf("Ensemble number: %d Number of Beams: %d  Number of Bins: %d", ensemble.EnsembleDataSet.EnsembleNumber, ensemble.EnsembleDataSet.NumBeams, ensemble.EnsembleDataSet.NumBins)
+		log.Print("Ensemble decoded")
 
-		ensJSON, _ := json.Marshal(ensemble)
+		// Publish the ensemble
+		codec.Read <- ensemble
 
-		fmt.Println(string(ensJSON))
+		log.Printf("Ensemble number: %d Number of Beams: %d  Number of Bins: %d", ensemble.EnsembleData.EnsembleNumber, ensemble.EnsembleData.NumBeams, ensemble.EnsembleData.NumBins)
+		//
+		// ensJSON, _ := json.Marshal(ensemble)
+		//
+		// fmt.Println(string(ensJSON))
 
 	}
 
@@ -223,35 +236,73 @@ func decodeEnsemble(data []byte) Ensemble {
 		dataSetSize = getDataSetSize(enstype, nameLen, numElements, elementMultiplier)
 
 		// Beam Velocity Dataset
-		if strings.Contains(name, beamVelocityID) {
-
-			// Move to the next dataset
-			packetPointer += dataSetSize
-		} else if strings.Contains(name, ensembleDataID) {
+		if strings.Contains(name, ensembleDataID) {
 			// Base
-			ensemble.EnsembleDataSet.Base.Enstype = enstype
-			ensemble.EnsembleDataSet.Base.NumElements = numElements
-			ensemble.EnsembleDataSet.Base.ElementMultiplier = elementMultiplier
-			ensemble.EnsembleDataSet.Base.Imag = imag
-			ensemble.EnsembleDataSet.Base.NameLen = nameLen
-			ensemble.EnsembleDataSet.Base.Name = name
+			ensemble.EnsembleData.Base.Enstype = enstype
+			ensemble.EnsembleData.Base.NumElements = numElements
+			ensemble.EnsembleData.Base.ElementMultiplier = elementMultiplier
+			ensemble.EnsembleData.Base.Imag = imag
+			ensemble.EnsembleData.Base.NameLen = nameLen
+			ensemble.EnsembleData.Base.Name = name
 
 			// Ensemble Data Set
-			ensemble.EnsembleDataSet.Decode(data[packetPointer : packetPointer+dataSetSize])
+			ensemble.EnsembleData.Decode(data[packetPointer : packetPointer+dataSetSize])
 
 			// Move to the next dataset
 			packetPointer += dataSetSize
 		} else if strings.Contains(name, ancillaryID) {
 			// Base
-			ensemble.AncillaryDataSet.Base.Enstype = enstype
-			ensemble.AncillaryDataSet.Base.NumElements = numElements
-			ensemble.AncillaryDataSet.Base.ElementMultiplier = elementMultiplier
-			ensemble.AncillaryDataSet.Base.Imag = imag
-			ensemble.AncillaryDataSet.Base.NameLen = nameLen
-			ensemble.AncillaryDataSet.Base.Name = name
+			ensemble.AncillaryData.Base.Enstype = enstype
+			ensemble.AncillaryData.Base.NumElements = numElements
+			ensemble.AncillaryData.Base.ElementMultiplier = elementMultiplier
+			ensemble.AncillaryData.Base.Imag = imag
+			ensemble.AncillaryData.Base.NameLen = nameLen
+			ensemble.AncillaryData.Base.Name = name
 
 			// Ancillary Data Set
-			ensemble.AncillaryDataSet.Decode(data[packetPointer : packetPointer+dataSetSize])
+			ensemble.AncillaryData.Decode(data[packetPointer : packetPointer+dataSetSize])
+
+			// Move to the next dataset
+			packetPointer += dataSetSize
+		} else if strings.Contains(name, beamVelocityID) {
+			// Base
+			ensemble.BeamVelocityData.Base.Enstype = enstype
+			ensemble.BeamVelocityData.Base.NumElements = numElements
+			ensemble.BeamVelocityData.Base.ElementMultiplier = elementMultiplier
+			ensemble.BeamVelocityData.Base.Imag = imag
+			ensemble.BeamVelocityData.Base.NameLen = nameLen
+			ensemble.BeamVelocityData.Base.Name = name
+
+			// Ensemble Data Set
+			ensemble.BeamVelocityData.Decode(data[packetPointer : packetPointer+dataSetSize])
+
+			// Move to the next dataset
+			packetPointer += dataSetSize
+		} else if strings.Contains(name, instrumentVelocityID) {
+			// Base
+			ensemble.InstrumentVelocityData.Base.Enstype = enstype
+			ensemble.InstrumentVelocityData.Base.NumElements = numElements
+			ensemble.InstrumentVelocityData.Base.ElementMultiplier = elementMultiplier
+			ensemble.InstrumentVelocityData.Base.Imag = imag
+			ensemble.InstrumentVelocityData.Base.NameLen = nameLen
+			ensemble.InstrumentVelocityData.Base.Name = name
+
+			// Ensemble Data Set
+			ensemble.InstrumentVelocityData.Decode(data[packetPointer : packetPointer+dataSetSize])
+
+			// Move to the next dataset
+			packetPointer += dataSetSize
+		} else if strings.Contains(name, earthVelocityID) {
+			// Base
+			ensemble.EarthVelocityData.Base.Enstype = enstype
+			ensemble.EarthVelocityData.Base.NumElements = numElements
+			ensemble.EarthVelocityData.Base.ElementMultiplier = elementMultiplier
+			ensemble.EarthVelocityData.Base.Imag = imag
+			ensemble.EarthVelocityData.Base.NameLen = nameLen
+			ensemble.EarthVelocityData.Base.Name = name
+
+			// Ensemble Data Set
+			ensemble.EarthVelocityData.Decode(data[packetPointer : packetPointer+dataSetSize])
 
 			// Move to the next dataset
 			packetPointer += dataSetSize
@@ -292,6 +343,12 @@ func GenerateIndex(index int, nameLen uint32, ensType uint32) int {
 	}
 
 	return getHeaderSize(nameLen) + (index * datatype)
+}
+
+// GetBinBeamIndex will get the index in the data for the value.
+// This is used for data with bin data, like velocity, correlation and amplitde.
+func GetBinBeamIndex(nameLen int, numBins int, beam int, bin int) int {
+	return getHeaderSize(uint32(nameLen)) + (beam * numBins * BytesInFloat) + (bin * BytesInFloat)
 }
 
 // getDataSetSize will get the size of the dataset.  It will user the number of elements and the
