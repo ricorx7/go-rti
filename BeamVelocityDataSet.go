@@ -9,6 +9,7 @@ import (
 // These values describe water profile data in m/s.
 // The data will be stored in array.  The array size will be based off the
 // base data set.
+// Bin x Beam
 type BeamVelocityDataSet struct {
 	Base     BaseDataSet // Base Dataset
 	Velocity [][]float32 // Velcity data in m/s

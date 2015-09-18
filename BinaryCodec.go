@@ -306,6 +306,34 @@ func decodeEnsemble(data []byte) Ensemble {
 
 			// Move to the next dataset
 			packetPointer += dataSetSize
+		} else if strings.Contains(name, amplitudeID) {
+			// Base
+			ensemble.AmplitudeData.Base.Enstype = enstype
+			ensemble.AmplitudeData.Base.NumElements = numElements
+			ensemble.AmplitudeData.Base.ElementMultiplier = elementMultiplier
+			ensemble.AmplitudeData.Base.Imag = imag
+			ensemble.AmplitudeData.Base.NameLen = nameLen
+			ensemble.AmplitudeData.Base.Name = name
+
+			// Ensemble Data Set
+			ensemble.AmplitudeData.Decode(data[packetPointer : packetPointer+dataSetSize])
+
+			// Move to the next dataset
+			packetPointer += dataSetSize
+		} else if strings.Contains(name, correlationID) {
+			// Base
+			ensemble.CorrelationData.Base.Enstype = enstype
+			ensemble.CorrelationData.Base.NumElements = numElements
+			ensemble.CorrelationData.Base.ElementMultiplier = elementMultiplier
+			ensemble.CorrelationData.Base.Imag = imag
+			ensemble.CorrelationData.Base.NameLen = nameLen
+			ensemble.CorrelationData.Base.Name = name
+
+			// Ensemble Data Set
+			ensemble.CorrelationData.Decode(data[packetPointer : packetPointer+dataSetSize])
+
+			// Move to the next dataset
+			packetPointer += dataSetSize
 		} else {
 			// Move to the next dataset
 			packetPointer += dataSetSize

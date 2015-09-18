@@ -34,4 +34,6 @@ type Ensemble struct {
 	BeamVelocityData       BeamVelocityDataSet       // Beam Velocity Data Set
 	InstrumentVelocityData InstrumentVelocityDataSet // Instrument Velocity Data Set
 	EarthVelocityData      EarthVelocityDataSet      // Earth Velocity Data Set
+	AmplitudeData          AmplitudeDataSet          // Amplitude Data Set
+	CorrelationData        CorrelationDataSet        // Correlation Data Set
 }
