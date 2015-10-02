@@ -12,6 +12,16 @@ const BytesInFloat = 4
 // BytesInInt8 is the number of bytes in Int8
 const BytesInInt8 = 1
 
+// BAD_VELOCITY is the value for a bad value.
+const BadVelocity = 88.88
+
+// VelocityVector holds the water maginitude and direction.
+type VelocityVector struct {
+	Magnitude       float64 // Magnitude of the water velocity
+	DirectionXNorth float64 // Direction of the water velocity with X north
+	DirectionYNorth float64 // Direction of the water velocity with Y north
+}
+
 // BaseDataSet is the base for all data sets.
 // It contains all the values to know the type
 // and size of the data set.

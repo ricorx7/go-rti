@@ -59,9 +59,16 @@ var headerIndex int     // Header index
 // BinaryCodec decodes and passes
 // all the decoded data as ensembles.
 type BinaryCodec struct {
-	Write     chan []byte   // Write binary data to be decoded
-	Read      chan Ensemble // Read out ensembles decoded
-	IsClosing bool          // Flag to stop decoding data
+	Write          chan []byte   // Write binary data to be decoded
+	Read           chan Ensemble // Read out ensembles decoded
+	IsClosing      bool          // Flag to stop decoding data
+	bufferIncoming chan []byte   // Buffer the incoming data to decode
+}
+
+// Init will initialize the codec.
+func (codec *BinaryCodec) Init() {
+	codec.bufferIncoming = make(chan []byte, 1024)
+	go codec.Run()
 }
 
 // Run will take any incoming data and decode it.
@@ -81,6 +88,7 @@ func (codec *BinaryCodec) Run() {
 	for {
 		select {
 		case d := <-codec.Write:
+			//log.Print("Start write data to codec")
 			//log.Printf("Decoding binary data: %d", len(d))
 
 			if codec.IsClosing {
@@ -88,18 +96,33 @@ func (codec *BinaryCodec) Run() {
 				return
 			}
 
-			mutex.Lock()
+			//log.Print("End binarycodec run write")
+			select {
+			case codec.bufferIncoming <- d: // Buffer the data to decode
+			default:
+				log.Print("Error writing data to buffer")
+			}
+			//log.Print("Stop write data to codec")
+		case d := <-codec.bufferIncoming:
+			//log.Print("Start write data to buffer")
+			//mutex.Lock()
 
 			// Add the data to the buffer
-			buffer.Write(d)
+			_, err := buffer.Write(d)
+			if err != nil {
+				log.Print(err)
+			}
 
 			//log.Printf("AddBuffer size: %d", buffer.Len())
+			//log.Printf("AddBuffer size: %d", len(d))
 
 			// Decode the data
 			decodeIncomingData(codec)
 
-			mutex.Unlock()
-			//log.Print("End binarycodec run write")
+			//mutex.Unlock()
+			//log.Print("Stop write data to buffer")
+		default:
+			//log.Print("Error in codec")
 		}
 	}
 }
@@ -424,6 +447,11 @@ func findHeader() {
 		// Check for errors or if the buffer is empty
 		if err != nil {
 			//log.Print("Error finding ID. " + err.Error())
+			return
+		}
+
+		// Verify still in range
+		if headerIndex >= len(header) {
 			return
 		}
 
